@@ -8,7 +8,7 @@ pipeline {
     stages {
         stage('git clone') {
             steps {
-                git url: 'https://github.com/Routparesh/node-todo-cicd.git' branch: 'aws-cicd'
+                git branch: 'aws-cicd', url: 'https://github.com/Routparesh/node-todo-cicd.git'
             }
         }
 
