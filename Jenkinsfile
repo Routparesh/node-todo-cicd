@@ -1,35 +1,46 @@
-pipeline{
-    agent { label 'dev-server' }
+pipeline {
+    agent { label 'paresh'}
     
-    stages{
-        stage("Code Clone"){
-            steps{
-                echo "Code Clone Stage"
-                git url: "https://github.com/LondheShubham153/node-todo-cicd.git", branch: "master"
+    environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('git clone') {
+            steps {
+                git url: 'https://github.com/Routparesh/node-todo-cicd.git' branch: 'aws-cicd'
             }
         }
-        stage("Code Build & Test"){
+
+        stage("Sonarqube Analysis "){
             steps{
-                echo "Code Build Stage"
-                sh "docker build -t node-app ."
-            }
-        }
-        stage("Push To DockerHub"){
-            steps{
-                withCredentials([usernamePassword(
-                    credentialsId:"dockerHubCreds",
-                    usernameVariable:"dockerHubUser", 
-                    passwordVariable:"dockerHubPass")]){
-                sh 'echo $dockerHubPass | docker login -u $dockerHubUser --password-stdin'
-                sh "docker image tag node-app:latest ${env.dockerHubUser}/node-app:latest"
-                sh "docker push ${env.dockerHubUser}/node-app:latest"
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=nodeapp \
+                    -Dsonar.projectKey=nodeapp '''
                 }
             }
         }
-        stage("Deploy"){
-            steps{
-                sh "docker compose down && docker compose up -d --build"
+        stage("quality gate"){
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                }
             }
         }
+        stage("TRIVY File scan"){
+            steps{
+                sh "trivy fs . > trivy-fs_report.txt"
+            }
+        }
+
+        stage("OWASP Dependency Check"){
+            withCredentials([usernamePassword(credentialsId: 'nvd-api-key', passwordVariable: 'nvd-Cred', usernameVariable: 'nvd-Var')]) {
+            steps{
+                dependencyCheck additionalArguments: '--scan ./ --format XML ', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+       }
+        
     }
 }
