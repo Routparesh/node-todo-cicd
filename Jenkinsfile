@@ -1,46 +1,109 @@
 pipeline {
-    agent { label 'paresh'}
-    
+    agent { label 'paresh' }
+
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
+        IMAGE_NAME   = 'routparesh/node-app'
+        IMAGE_TAG    = 'latest'
     }
 
     stages {
-        stage('git clone') {
+
+        stage('Git Clone') {
             steps {
-                git branch: 'aws-cicd', url: 'https://github.com/Routparesh/node-todo-cicd.git'
+                git branch: 'aws-cicd',
+                    url: 'https://github.com/Routparesh/node-todo-cicd.git'
             }
         }
 
-        stage("Sonarqube Analysis "){
-            steps{
+        stage('SonarQube Analysis') {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=nodeapp \
-                    -Dsonar.projectKey=nodeapp '''
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                          $SCANNER_HOME/bin/sonar-scanner \
+                          -Dsonar.token=$SONAR_TOKEN
+                        '''
+                    }
                 }
             }
         }
-        stage("quality gate"){
+
+        stage('Quality Gate') {
             steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                    waitForQualityGate abortPipeline: true,
+                        credentialsId: 'sonar-token'
                 }
             }
         }
-        stage("TRIVY File scan"){
-            steps{
-                sh "trivy fs . > trivy-fs_report.txt"
+
+        stage('Trivy FS Scan') {
+            steps {
+                sh '''
+                  trivy fs . \
+                  --severity HIGH,CRITICAL \
+                  --exit-code 0 \
+                  > trivy-fs.txt
+                '''
             }
         }
 
-        stage("OWASP Dependency Check"){
-            withCredentials([usernamePassword(credentialsId: 'nvd-api-key', passwordVariable: 'nvd-Cred', usernameVariable: 'nvd-Var')]) {
-            steps{
-                dependencyCheck additionalArguments: '--scan ./ --format XML ', odcInstallation: 'DP-Check'
+        stage('OWASP Dependency Check') {
+            steps {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck(
+                        additionalArguments: '''
+                          --scan . \
+                          --format XML \
+                          --nvdApiKey $NVD_API_KEY
+                        ''',
+                        odcInstallation: 'DP-Check'
+                    )
+                }
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-       }
-        
+
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                      docker login -u $DOCKER_USER -p $DOCKER_PASS
+                    '''
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh '''
+                  docker build -t $IMAGE_NAME:$IMAGE_TAG .
+                '''
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh '''
+                  trivy image $IMAGE_NAME:$IMAGE_TAG \
+                  --severity HIGH,CRITICAL \
+                  --exit-code 0 \
+                  > trivy-image.txt
+                '''
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                sh '''
+                  docker push $IMAGE_NAME:$IMAGE_TAG
+                '''
+            }
+        }
     }
 }
