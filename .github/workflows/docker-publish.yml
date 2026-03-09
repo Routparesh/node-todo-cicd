@@ -7,7 +7,6 @@ on:
 
 jobs:
   docker:
-    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -22,10 +21,11 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          push: true
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: |
             routparesh/node-todo:latest
             routparesh/node-todo:${{ github.sha }}
